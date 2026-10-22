@@ -31,6 +31,22 @@ endif()
 # already are.
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# MSVC: link the C++ runtime statically. A binary built with the STL of a
+# recent toolset needs an msvcp140.dll at least as new, and a host that
+# bundles its own, older runtime (Blender 4.x ships 14.29; the loader keeps
+# the copy already in the process) crashes in the first std::mutex /
+# condition_variable (_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR alone is not
+# enough). With /MT the extension module imports no msvcp140 / vcruntime140
+# at all. Applies to the vcpkg ports (static triplet), cesium-native, libzip
+# and the module.
+option(CESIUM_PYTHON_STATIC_CRT "Link the MSVC runtime statically (/MT)" ON)
+if(MSVC AND CESIUM_PYTHON_STATIC_CRT)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    if(NOT VCPKG_TARGET_TRIPLET AND NOT DEFINED ENV{VCPKG_TRIPLET})
+        set(VCPKG_TARGET_TRIPLET "x64-windows-static")
+    endif()
+endif()
+
 message(STATUS "Adding cesium-native subdirectory...")
 add_subdirectory(extern/cesium-native EXCLUDE_FROM_ALL)
 
