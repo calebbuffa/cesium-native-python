@@ -1,0 +1,137 @@
+# Build wheels for CPython 3.11-3.13 on Linux (manylinux_2_28), Windows and
+# macOS (arm64) with cibuildwheel, and publish them to PyPI on a version tag.
+#
+# cesium-native pulls ~30 vcpkg ports (abseil, draco, s2geometry, ktx, ...)
+# and compiles them from source: the first run per OS takes 1-3 h.  The vcpkg
+# tree (~/.ezvcpkg) is cached between runs, which brings later runs to the
+# bindings only (~15 min).  On Linux the build runs inside the manylinux
+# container; cibuildwheel mounts the runner's filesystem at /host, so the same
+# cache directory is used there.
+name: wheels
+
+on:
+  workflow_dispatch:
+    inputs:
+      os:
+        description: "Runners to build on (JSON list)"
+        default: '["ubuntu-24.04", "windows-2022", "macos-14"]'
+      release_tag:
+        description: "Attach the wheels to this GitHub Release (created if missing); empty = artifacts only"
+        default: ""
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(inputs.os || '["ubuntu-24.04", "windows-2022", "macos-14"]') }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # restore / save split so the vcpkg tree is kept even when the wheel step
+      # fails: the ports that did build are not rebuilt on the next run
+      - name: Restore vcpkg tree
+        id: vcpkg-cache
+        uses: actions/cache/restore@v4
+        with:
+          # the vcpkg clone + installed prefix (~1.5 GB per OS); build trees,
+          # downloads and packages are not needed to reuse the ports
+          path: |
+            ~/.ezvcpkg
+            !~/.ezvcpkg/*/buildtrees
+            !~/.ezvcpkg/*/downloads
+            !~/.ezvcpkg/*/packages
+          key: ezvcpkg-v2-${{ runner.os }}-${{ hashFiles('extern/cesium-native/vcpkg.json', 'extern/cesium-native/cmake/ezvcpkg/**') }}
+          restore-keys: ezvcpkg-v2-${{ runner.os }}-
+
+      - name: Build wheels
+        run: |
+          python -m pip install -U pip cibuildwheel
+          python -m cibuildwheel --output-dir wheelhouse
+        env:
+          CIBW_BUILD: cp311-* cp312-* cp313-*
+          CIBW_SKIP: "*musllinux*"
+          CIBW_ARCHS: auto64
+          CIBW_BUILD_VERBOSITY: 1
+          CIBW_ENVIRONMENT: CMAKE_BUILD_PARALLEL_LEVEL=4 VCPKG_MAX_CONCURRENCY=4
+          # Linux: vcpkg needs these to bootstrap and build its ports
+          CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
+          CIBW_BEFORE_ALL_LINUX: >
+            dnf install -y curl zip unzip tar nasm ninja-build perl-core
+            autoconf automake libtool pkgconfig
+          CIBW_ENVIRONMENT_LINUX: >
+            EZVCPKG_BASEDIR=/host/home/runner/.ezvcpkg
+            CMAKE_BUILD_PARALLEL_LEVEL=4 VCPKG_MAX_CONCURRENCY=4
+          # macOS: Homebrew tools for the same ports; arm64 only on macos-14
+          CIBW_BEFORE_ALL_MACOS: brew install nasm ninja autoconf automake libtool pkg-config
+          CIBW_ENVIRONMENT_MACOS: >
+            MACOSX_DEPLOYMENT_TARGET=12.0
+            CMAKE_BUILD_PARALLEL_LEVEL=4 VCPKG_MAX_CONCURRENCY=4
+          # the extension links everything statically: no wheel repair needed
+          CIBW_REPAIR_WHEEL_COMMAND_WINDOWS: ""
+          CIBW_TEST_COMMAND: python -c "import cesium; from cesium.tiles import content; content.register_all_tile_content_types(); print('cesium ok')"
+
+      - name: Save vcpkg tree
+        if: always() && steps.vcpkg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.ezvcpkg
+            !~/.ezvcpkg/*/buildtrees
+            !~/.ezvcpkg/*/downloads
+            !~/.ezvcpkg/*/packages
+          key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: wheelhouse/*.whl
+
+  release:
+    # GitHub Release assets: on a v* tag, or on a manual run with release_tag.
+    # Downstream installers (e.g. the Blender add-on) fetch wheels from here.
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.release_tag || github.ref_name }}
+        run: |
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --notes "cesium-native-python wheels (CPython 3.11-3.13; Linux x86_64, Windows x64, macOS arm64)"
+          gh release upload "$TAG" dist/*.whl --repo "$GITHUB_REPOSITORY" --clobber
+
+  publish:
+    # PyPI trusted publishing: register this repository + workflow under the
+    # project's "Publishing" settings on pypi.org, then tag v*.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
