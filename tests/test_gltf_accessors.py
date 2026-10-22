@@ -88,9 +88,12 @@ except ValueError as e:
     assert "collapse_to_single_buffer" in str(e), e
     print("C9 ok:", str(e)[:60])
 
-# C1: content types registered at import: the b3dm converter resolves by extension
+# C1: content types registered at import: the converters resolve without an
+# explicit register_all_tile_content_types() call (cesium-native registers
+# b3dm / pnts / i3dm / cmpt by magic and glTF / GLB by extension and magic)
 from cesium.tiles import content  # noqa: E402
-assert content.GltfConverters.converter_by_file_extension("tile.b3dm") == "b3dm"
-assert content.GltfConverters.converter_by_magic(b"b3dm" + b"\0" * 24) == "b3dm"
-print("C1 ok: b3dm converter registered at import")
+assert content.GltfConverters.converter_by_magic(b"b3dm" + bytes(24)) == "b3dm"
+assert content.GltfConverters.converter_by_magic(b"glTF" + bytes(24)) == "binary"
+assert content.GltfConverters.converter_by_file_extension("tile.glb") == "binary"
+print("C1 ok: converters registered at import")
 print("ALL OK", cesium.__file__)
