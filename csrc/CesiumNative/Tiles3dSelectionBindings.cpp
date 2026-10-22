@@ -57,6 +57,21 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+// MSVC: TileChildrenResult holds std::vector<Tile>; Tile is move-only, but
+// std::is_copy_constructible<TileChildrenResult> is still true, so pybind11
+// would instantiate (and fail on) the implicit copy constructor. Opt out.
+namespace pybind11 {
+namespace detail {
+template <>
+struct is_copy_constructible<Cesium3DTilesSelection::TileChildrenResult>
+    : std::false_type {};
+template <>
+struct is_copy_assignable<Cesium3DTilesSelection::TileChildrenResult>
+    : std::false_type {};
+} // namespace detail
+} // namespace pybind11
+
+
 // Force pybind11 to treat BoundingVolume (a std::variant typedef) as a
 // registered py::class_ instead of using the automatic std::variant caster
 // from pybind11/stl.h, which can't default-construct the variant.

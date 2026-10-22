@@ -1,7 +1,23 @@
 # Third-party dependency bootstrapping for cesium-python.
 
-find_package(Python 3.8 REQUIRED COMPONENTS Interpreter Development)
-find_package(pybind11 REQUIRED)
+# Development.Module (not Development): manylinux images ship no libpython and
+# an extension module must not link one anyway.
+find_package(Python 3.8 REQUIRED COMPONENTS Interpreter Development.Module)
+
+# pybind11 comes from the build environment (pyproject build-system.requires);
+# let it tell us where its CMake package is, so a plain `pip install .` works
+# with no -Dpybind11_DIR.
+if(NOT pybind11_DIR)
+    execute_process(
+        COMMAND "${Python_EXECUTABLE}" -c "import pybind11; print(pybind11.get_cmake_dir())"
+        OUTPUT_VARIABLE _pybind11_cmake_dir
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET)
+    if(_pybind11_cmake_dir)
+        set(pybind11_DIR "${_pybind11_cmake_dir}")
+    endif()
+endif()
+find_package(pybind11 CONFIG REQUIRED)
 
 # Verify submodules are present
 set(CESIUM_NATIVE_DIR "${CMAKE_SOURCE_DIR}/extern/cesium-native")
@@ -9,19 +25,66 @@ if(NOT EXISTS "${CESIUM_NATIVE_DIR}/CMakeLists.txt")
     message(FATAL_ERROR "Missing submodule: extern/cesium-native. Run: git submodule update --init --recursive")
 endif()
 
+# Build all submodules as static libraries (no DLL at runtime): cesium-native
+# and libzip alike, so this goes before either is added. CACHE+FORCE
+# overrides stale values in an existing build directory.
+if(DEFINED BUILD_SHARED_LIBS)
+    set(_BUILD_SHARED_LIBS_ORIG ${BUILD_SHARED_LIBS})
+endif()
+cmake_policy(SET CMP0077 NEW)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libraries" FORCE)
+
+# cesium-native and libzip are built here as static libraries that end up
+# inside a shared extension module, so they must be position independent
+# (GNU ld otherwise refuses them: "recompile with -fPIC"); vcpkg's own ports
+# already are.
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+# MSVC: link the C++ runtime statically. A binary built with the STL of a
+# recent toolset needs an msvcp140.dll at least as new, and a host that
+# bundles its own, older runtime (Blender 4.x ships 14.29; the loader keeps
+# the copy already in the process) crashes in the first std::mutex /
+# condition_variable (_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR alone is not
+# enough). With /MT the extension module imports no msvcp140 / vcruntime140
+# at all. Applies to the vcpkg ports (static triplet), cesium-native, libzip
+# and the module.
+option(CESIUM_PYTHON_STATIC_CRT "Link the MSVC runtime statically (/MT)" ON)
+if(MSVC AND CESIUM_PYTHON_STATIC_CRT)
+    set(_cesium_triplet "${VCPKG_TARGET_TRIPLET}")
+    if(NOT _cesium_triplet AND DEFINED ENV{VCPKG_TRIPLET})
+        set(_cesium_triplet "$ENV{VCPKG_TRIPLET}")
+    endif()
+    if(NOT _cesium_triplet)
+        set(_cesium_triplet "x64-windows-static")
+        set(VCPKG_TARGET_TRIPLET "${_cesium_triplet}")
+    endif()
+    # the module must use the same CRT as the vcpkg ports it links
+    if(_cesium_triplet MATCHES "-static$")
+        set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    else()
+        message(WARNING "CESIUM_PYTHON_STATIC_CRT is ON but the vcpkg triplet "
+                        "'${_cesium_triplet}' uses the dynamic CRT; keeping /MD to match it")
+    endif()
+endif()
+
+message(STATUS "Adding cesium-native subdirectory...")
+add_subdirectory(extern/cesium-native EXCLUDE_FROM_ALL)
+
+# libzip needs zlib. cesium-native (above) has just had vcpkg install one; point
+# FindZLIB at that prefix so libzip does not pick a system zlib (or, on Windows,
+# fail to find any). PACKAGE_BUILD_DIR is set by cesium-native's CMakeLists.
+get_directory_property(_cesium_pkg_dir DIRECTORY "${CESIUM_NATIVE_DIR}" DEFINITION PACKAGE_BUILD_DIR)
+if(_cesium_pkg_dir AND NOT ZLIB_ROOT AND EXISTS "${_cesium_pkg_dir}/include/zlib.h")
+    set(ZLIB_ROOT "${_cesium_pkg_dir}")
+    set(ZLIB_USE_STATIC_LIBS ON)
+    message(STATUS "libzip: using cesium-native's vcpkg zlib at ${ZLIB_ROOT}")
+endif()
 set(LIBZIP_DIR "${CMAKE_SOURCE_DIR}/extern/libzip")
 if(NOT EXISTS "${LIBZIP_DIR}/CMakeLists.txt")
     message(FATAL_ERROR "Missing submodule: extern/libzip. Run: git submodule update --init --recursive")
 endif()
 
 
-# Build all submodules as static libraries (no DLL at runtime).
-# Use CACHE+FORCE to override stale values in an existing build directory.
-if(DEFINED BUILD_SHARED_LIBS)
-    set(_BUILD_SHARED_LIBS_ORIG ${BUILD_SHARED_LIBS})
-endif()
-cmake_policy(SET CMP0077 NEW)
-set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libraries" FORCE)
 
 set(LIBZIP_DO_INSTALL OFF CACHE BOOL "Skip libzip install")
 set(ENABLE_BZIP2 OFF CACHE BOOL "Disable bzip2 support")
@@ -29,8 +92,6 @@ set(ENABLE_LZMA OFF CACHE BOOL "Disable lzma support")
 set(ENABLE_ZSTD OFF CACHE BOOL "Disable zstd support")
 add_subdirectory(extern/libzip EXCLUDE_FROM_ALL)
 
-message(STATUS "Adding cesium-native subdirectory...")
-add_subdirectory(extern/cesium-native EXCLUDE_FROM_ALL)
 
 # glm::glm should be an imported target after cesium-native's ezvcpkg runs.
 # However, when cmake is invoked without the vcpkg toolchain (e.g., via pip),
@@ -95,3 +156,10 @@ set(CESIUM_PYTHON_LINK_LIBS
     CesiumVectorData
     glm::glm
 )
+
+# glibc < 2.34 keeps getaddrinfo_a (used through the vcpkg ports) in libanl;
+# without it the extension module imports with "undefined symbol:
+# getaddrinfo_a" on manylinux_2_28. libanl.so.1 is on the manylinux whitelist.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    list(APPEND CESIUM_PYTHON_LINK_LIBS anl)
+endif()

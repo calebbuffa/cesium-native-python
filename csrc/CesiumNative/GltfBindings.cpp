@@ -2392,11 +2392,12 @@ void initGltfBindings(py::module& m) {
                 if constexpr (nc == 1)
                   return py::object(py::array_t<Scalar>(0));
                 else if constexpr (std::is_same_v<T, glm::mat4>)
-                  return py::object(
-                      py::array_t<Scalar>(
-                          {py::ssize_t{0}, py::ssize_t{4}, py::ssize_t{4}}));
+                  return py::object(py::array_t<Scalar>(
+                      py::array::ShapeContainer{
+                          py::ssize_t{0}, py::ssize_t{4}, py::ssize_t{4}}));
                 else
-                  return py::object(py::array_t<Scalar>({py::ssize_t{0}, nc}));
+                  return py::object(py::array_t<Scalar>(
+                      py::array::ShapeContainer{py::ssize_t{0}, nc}));
               }
 
               // Zero-copy path: build a numpy array that views

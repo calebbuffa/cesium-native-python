@@ -246,7 +246,8 @@ void initIonClientBindings(py::module& m) {
           &CesiumIonClient::GeocoderAttribution::showOnScreen);
 
   py::class_<CesiumIonClient::GeocoderFeature>(m, "GeocoderFeature")
-      .def(py::init<>())
+      // no default ctor: `destination` is a variant whose first alternative
+      // (GlobeRectangle) is not default constructible
       .def_readwrite(
           "display_name",
           &CesiumIonClient::GeocoderFeature::displayName)
