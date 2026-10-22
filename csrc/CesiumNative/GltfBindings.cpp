@@ -249,6 +249,35 @@ void initGltfBindings(py::module& m) {
             std::memcpy(self.pixelData.data(), ptr, buf.size);
           })
       .def_readwrite("size_bytes", &CesiumGltf::ImageAsset::sizeBytes)
+      .def_property_readonly(
+          "pixels",
+          [](py::object selfObj) -> py::object {
+            auto& self = selfObj.cast<CesiumGltf::ImageAsset&>();
+            if (self.compressedPixelFormat !=
+                CesiumGltf::GpuCompressedPixelFormat::NONE)
+              throw py::value_error(
+                  "pixels: image is GPU-compressed; decode with "
+                  "Ktx2TranscodeTargets left empty to get RGBA8");
+            const py::ssize_t h = self.height, w = self.width,
+                              c = self.channels, b = self.bytesPerChannel;
+            if (h <= 0 || w <= 0 || c <= 0 || b <= 0 ||
+                static_cast<py::ssize_t>(self.pixelData.size()) < h * w * c * b)
+              throw py::value_error("pixels: image has no decoded pixel data");
+            py::array raw = CesiumPython::bytesVectorToNumpy(
+                self.pixelData,
+                selfObj);
+            auto np = py::module_::import("numpy");
+            py::object dtype = b == 1   ? np.attr("uint8")
+                               : b == 2 ? np.attr("uint16")
+                               : b == 4 ? np.attr("float32")
+                                        : np.attr("uint8");
+            py::object flat = raw.attr("__getitem__")(
+                py::slice(0, h * w * c * b, 1));
+            return flat.attr("view")(dtype).attr("reshape")(h, w, c);
+          },
+          "Decoded pixels as a zero-copy (height, width, channels) numpy\n"
+          "view (uint8 / uint16 / float32 by bytes_per_channel; the first\n"
+          "mip level). Raises for GPU-compressed images.")
       .def(
           "change_number_of_channels",
           [](CesiumGltf::ImageAsset& self,
