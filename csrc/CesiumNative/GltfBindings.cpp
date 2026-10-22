@@ -38,6 +38,7 @@
 #include <CesiumGltf/FeatureIdTexture.h>
 #include <CesiumGltf/Image.h>
 #include <CesiumGltf/ImageAsset.h>
+#include <glm/glm.hpp>
 #include <CesiumGltf/InstanceAttributeSemantics.h>
 #include <CesiumGltf/KhrTextureTransform.h>
 #include <CesiumGltf/Ktx2TranscodeTargets.h>
@@ -85,13 +86,22 @@ template <typename T> struct NumComponents {
     if constexpr (std::is_arithmetic_v<T>)
       return 1;
     else if constexpr (
-        std::is_same_v<T, glm::vec2> || std::is_same_v<T, glm::dvec2>)
+        std::is_same_v<T, glm::vec2> || std::is_same_v<T, glm::dvec2> ||
+        std::is_same_v<T, glm::i8vec2> || std::is_same_v<T, glm::u8vec2> ||
+        std::is_same_v<T, glm::i16vec2> || std::is_same_v<T, glm::u16vec2> ||
+        std::is_same_v<T, glm::u32vec2>)
       return 2;
     else if constexpr (
-        std::is_same_v<T, glm::vec3> || std::is_same_v<T, glm::dvec3>)
+        std::is_same_v<T, glm::vec3> || std::is_same_v<T, glm::dvec3> ||
+        std::is_same_v<T, glm::i8vec3> || std::is_same_v<T, glm::u8vec3> ||
+        std::is_same_v<T, glm::i16vec3> || std::is_same_v<T, glm::u16vec3> ||
+        std::is_same_v<T, glm::u32vec3>)
       return 3;
     else if constexpr (
-        std::is_same_v<T, glm::vec4> || std::is_same_v<T, glm::dvec4>)
+        std::is_same_v<T, glm::vec4> || std::is_same_v<T, glm::dvec4> ||
+        std::is_same_v<T, glm::i8vec4> || std::is_same_v<T, glm::u8vec4> ||
+        std::is_same_v<T, glm::i16vec4> || std::is_same_v<T, glm::u16vec4> ||
+        std::is_same_v<T, glm::u32vec4>)
       return 4;
     else if constexpr (std::is_same_v<T, glm::mat4>)
       return 16;
@@ -2481,6 +2491,22 @@ void initGltfBindings(py::module& m) {
   bindAccessorView.operator()<glm::dvec3>("AccessorViewDVec3");
   bindAccessorView.operator()<glm::dvec4>("AccessorViewDVec4");
   bindAccessorView.operator()<glm::mat4>("AccessorViewMat4");
+  // integer vectors: normalized COLOR_0 / TEXCOORD / JOINTS / WEIGHTS
+  bindAccessorView.operator()<glm::i8vec2>("AccessorViewI8Vec2");
+  bindAccessorView.operator()<glm::i8vec3>("AccessorViewI8Vec3");
+  bindAccessorView.operator()<glm::i8vec4>("AccessorViewI8Vec4");
+  bindAccessorView.operator()<glm::u8vec2>("AccessorViewU8Vec2");
+  bindAccessorView.operator()<glm::u8vec3>("AccessorViewU8Vec3");
+  bindAccessorView.operator()<glm::u8vec4>("AccessorViewU8Vec4");
+  bindAccessorView.operator()<glm::i16vec2>("AccessorViewI16Vec2");
+  bindAccessorView.operator()<glm::i16vec3>("AccessorViewI16Vec3");
+  bindAccessorView.operator()<glm::i16vec4>("AccessorViewI16Vec4");
+  bindAccessorView.operator()<glm::u16vec2>("AccessorViewU16Vec2");
+  bindAccessorView.operator()<glm::u16vec3>("AccessorViewU16Vec3");
+  bindAccessorView.operator()<glm::u16vec4>("AccessorViewU16Vec4");
+  bindAccessorView.operator()<glm::u32vec2>("AccessorViewU32Vec2");
+  bindAccessorView.operator()<glm::u32vec3>("AccessorViewU32Vec3");
+  bindAccessorView.operator()<glm::u32vec4>("AccessorViewU32Vec4");
 
   // ── AccessorView factory ──────────────────────────────────────────────
   // ``AccessorView(model, accessor_index)`` auto-detects componentType +
@@ -2535,20 +2561,62 @@ void initGltfBindings(py::module& m) {
             break;
           }
         } else if (type == AT::VEC2) {
-          if (ct == CT::FLOAT)
+          switch (ct) {
+          case CT::FLOAT:
             RETURN_VIEW(glm::vec2);
-          if (ct == CT::DOUBLE)
+          case CT::DOUBLE:
             RETURN_VIEW(glm::dvec2);
+          case CT::BYTE:
+            RETURN_VIEW(glm::i8vec2);
+          case CT::UNSIGNED_BYTE:
+            RETURN_VIEW(glm::u8vec2);
+          case CT::SHORT:
+            RETURN_VIEW(glm::i16vec2);
+          case CT::UNSIGNED_SHORT:
+            RETURN_VIEW(glm::u16vec2);
+          case CT::UNSIGNED_INT:
+            RETURN_VIEW(glm::u32vec2);
+          default:
+            break;
+          }
         } else if (type == AT::VEC3) {
-          if (ct == CT::FLOAT)
+          switch (ct) {
+          case CT::FLOAT:
             RETURN_VIEW(glm::vec3);
-          if (ct == CT::DOUBLE)
+          case CT::DOUBLE:
             RETURN_VIEW(glm::dvec3);
+          case CT::BYTE:
+            RETURN_VIEW(glm::i8vec3);
+          case CT::UNSIGNED_BYTE:
+            RETURN_VIEW(glm::u8vec3);
+          case CT::SHORT:
+            RETURN_VIEW(glm::i16vec3);
+          case CT::UNSIGNED_SHORT:
+            RETURN_VIEW(glm::u16vec3);
+          case CT::UNSIGNED_INT:
+            RETURN_VIEW(glm::u32vec3);
+          default:
+            break;
+          }
         } else if (type == AT::VEC4) {
-          if (ct == CT::FLOAT)
+          switch (ct) {
+          case CT::FLOAT:
             RETURN_VIEW(glm::vec4);
-          if (ct == CT::DOUBLE)
+          case CT::DOUBLE:
             RETURN_VIEW(glm::dvec4);
+          case CT::BYTE:
+            RETURN_VIEW(glm::i8vec4);
+          case CT::UNSIGNED_BYTE:
+            RETURN_VIEW(glm::u8vec4);
+          case CT::SHORT:
+            RETURN_VIEW(glm::i16vec4);
+          case CT::UNSIGNED_SHORT:
+            RETURN_VIEW(glm::u16vec4);
+          case CT::UNSIGNED_INT:
+            RETURN_VIEW(glm::u32vec4);
+          default:
+            break;
+          }
         } else if (type == AT::MAT4) {
           if (ct == CT::FLOAT)
             RETURN_VIEW(glm::mat4);
@@ -2565,8 +2633,61 @@ void initGltfBindings(py::module& m) {
       py::keep_alive<0, 1>(),
       "Create a typed AccessorView from a model and accessor index.\n\n"
       "Auto-detects the accessor's type and componentType and returns\n"
-      "the matching AccessorView (e.g. AccessorViewVec3 for VEC3/FLOAT).\n"
-      "Use ``np.array(view)`` for a zero-copy numpy array.");
+      "the matching AccessorView (e.g. AccessorViewVec3 for VEC3/FLOAT,\n"
+      "AccessorViewU8Vec4 for VEC4/UNSIGNED_BYTE).\n"
+      "Use ``np.array(view)`` for a zero-copy numpy array of the stored\n"
+      "component type; ``accessor_to_numpy`` also applies ``normalized``.");
+
+  m.def(
+      "accessor_to_numpy",
+      [](const CesiumGltf::Model& model, int32_t accessorIndex) -> py::object {
+        const auto* acc =
+            CesiumGltf::Model::getSafe(&model.accessors, accessorIndex);
+        if (!acc)
+          throw py::value_error("invalid accessor index");
+        py::object view =
+            py::module_::import("cesium.gltf").attr("AccessorView")(
+                py::cast(model, py::return_value_policy::reference),
+                accessorIndex);
+        auto np = py::module_::import("numpy");
+        py::object arr = np.attr("asarray")(view);
+        if (!acc->normalized)
+          return arr;
+        // glTF: unsigned normalized = x / max; signed = max(x / max, -1)
+        using CT = CesiumGltf::Accessor::ComponentType;
+        double maxValue = 0.0;
+        bool isSigned = false;
+        switch (acc->componentType) {
+        case CT::BYTE:
+          maxValue = 127.0;
+          isSigned = true;
+          break;
+        case CT::UNSIGNED_BYTE:
+          maxValue = 255.0;
+          break;
+        case CT::SHORT:
+          maxValue = 32767.0;
+          isSigned = true;
+          break;
+        case CT::UNSIGNED_SHORT:
+          maxValue = 65535.0;
+          break;
+        default:
+          return arr;    // float / double: normalized has no meaning
+        }
+        py::object out =
+            arr.attr("astype")(np.attr("float32")).attr("__truediv__")(
+                py::float_(maxValue));
+        if (isSigned)
+          out = np.attr("maximum")(out, py::float_(-1.0));
+        return out;
+      },
+      py::arg("model"),
+      py::arg("accessor_index"),
+      "Accessor data as a numpy array, with the glTF ``normalized`` flag\n"
+      "applied: normalized integer components come back as float32 in\n"
+      "[0, 1] (unsigned) or [-1, 1] (signed); everything else is the\n"
+      "zero-copy view of the stored component type (see ``AccessorView``).");
 
   auto bindAccessorWriter = [&]<typename T>(const char* name) {
     py::class_<CesiumGltf::AccessorWriter<T>>(m, name)
