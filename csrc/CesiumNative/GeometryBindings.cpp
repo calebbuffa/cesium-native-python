@@ -393,8 +393,7 @@ void initGeometryBindings(py::module& m) {
           [](CesiumGeometry::AvailabilitySubtree& self,
              const py::iterable& buffers) {
             setSubtreeBuffersFromPython(self, buffers);
-          },
-          py::arg("buffers"));
+          });   // pybind11: no py::arg on properties
 
   py::class_<CesiumGeometry::AvailabilityNode>(m, "AvailabilityNode");
 
@@ -1671,7 +1670,7 @@ void initGeometryBindings(py::module& m) {
       });
 
   py::class_<CesiumGeometry::UpsampledQuadtreeNode>(m, "UpsampledQuadtreeNode")
-      .def(py::init<>())
+      // no default ctor: QuadtreeTileID has none
       .def(
           py::init<CesiumGeometry::QuadtreeTileID>(),
           py::arg("tile_id"))
@@ -1705,6 +1704,7 @@ void initGeometryBindings(py::module& m) {
            std::to_string(self.tileID.level) +
            ", x=" + std::to_string(self.tileID.x) +
            ", y=" + std::to_string(self.tileID.y) + "))";
+          });
 
     py::class_<CesiumGeometry::OctreeTileID>(m, "OctreeTileID")
         .def(py::init<>())

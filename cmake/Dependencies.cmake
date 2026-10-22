@@ -9,6 +9,18 @@ if(NOT EXISTS "${CESIUM_NATIVE_DIR}/CMakeLists.txt")
     message(FATAL_ERROR "Missing submodule: extern/cesium-native. Run: git submodule update --init --recursive")
 endif()
 
+message(STATUS "Adding cesium-native subdirectory...")
+add_subdirectory(extern/cesium-native EXCLUDE_FROM_ALL)
+
+# libzip needs zlib. cesium-native (above) has just had vcpkg install one; point
+# FindZLIB at that prefix so libzip does not pick a system zlib (or, on Windows,
+# fail to find any). PACKAGE_BUILD_DIR is set by cesium-native's CMakeLists.
+get_directory_property(_cesium_pkg_dir DIRECTORY "${CESIUM_NATIVE_DIR}" DEFINITION PACKAGE_BUILD_DIR)
+if(_cesium_pkg_dir AND NOT ZLIB_ROOT AND EXISTS "${_cesium_pkg_dir}/include/zlib.h")
+    set(ZLIB_ROOT "${_cesium_pkg_dir}")
+    set(ZLIB_USE_STATIC_LIBS ON)
+    message(STATUS "libzip: using cesium-native's vcpkg zlib at ${ZLIB_ROOT}")
+endif()
 set(LIBZIP_DIR "${CMAKE_SOURCE_DIR}/extern/libzip")
 if(NOT EXISTS "${LIBZIP_DIR}/CMakeLists.txt")
     message(FATAL_ERROR "Missing submodule: extern/libzip. Run: git submodule update --init --recursive")
@@ -29,8 +41,6 @@ set(ENABLE_LZMA OFF CACHE BOOL "Disable lzma support")
 set(ENABLE_ZSTD OFF CACHE BOOL "Disable zstd support")
 add_subdirectory(extern/libzip EXCLUDE_FROM_ALL)
 
-message(STATUS "Adding cesium-native subdirectory...")
-add_subdirectory(extern/cesium-native EXCLUDE_FROM_ALL)
 
 # glm::glm should be an imported target after cesium-native's ezvcpkg runs.
 # However, when cmake is invoked without the vcpkg toolchain (e.g., via pip),
