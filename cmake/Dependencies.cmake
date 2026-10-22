@@ -25,6 +25,12 @@ if(NOT EXISTS "${CESIUM_NATIVE_DIR}/CMakeLists.txt")
     message(FATAL_ERROR "Missing submodule: extern/cesium-native. Run: git submodule update --init --recursive")
 endif()
 
+# cesium-native and libzip are built here as static libraries that end up
+# inside a shared extension module, so they must be position independent
+# (GNU ld otherwise refuses them: "recompile with -fPIC"); vcpkg's own ports
+# already are.
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
 message(STATUS "Adding cesium-native subdirectory...")
 add_subdirectory(extern/cesium-native EXCLUDE_FROM_ALL)
 
