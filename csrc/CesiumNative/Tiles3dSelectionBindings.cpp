@@ -1200,7 +1200,9 @@ void initTiles3dSelectionBindings(py::module& m) {
       "preload flags, forbid_holes, main_thread_loading_time_limit).\n"
       "Fields the loader reads when the tileset is created only count when\n"
       "set before that: maximum_simultaneous_tile_loads, request_headers,\n"
-      "content options and the ellipsoid.")
+      "content options and the ellipsoid. Change fields from the thread\n"
+      "that drives update_view_group, between two updates: the GIL is\n"
+      "released while an update runs and the C++ side reads them unlocked.")
       .def(py::init<>())
       .def_readwrite("credit", &Cesium3DTilesSelection::TilesetOptions::credit)
       .def_readwrite(

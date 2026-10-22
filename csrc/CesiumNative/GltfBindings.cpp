@@ -273,11 +273,14 @@ void initGltfBindings(py::module& m) {
                                         : np.attr("uint8");
             py::object flat = raw.attr("__getitem__")(
                 py::slice(0, h * w * c * b, 1));
-            return flat.attr("view")(dtype).attr("reshape")(h, w, c);
+            // an owning copy: pixel_data (the raw view) may be replaced or
+            // resized later, which would leave a retained view dangling
+            return flat.attr("view")(dtype).attr("reshape")(h, w, c).attr("copy")();
           },
-          "Decoded pixels as a zero-copy (height, width, channels) numpy\n"
-          "view (uint8 / uint16 / float32 by bytes_per_channel; the first\n"
-          "mip level). Raises for GPU-compressed images.")
+          "Decoded pixels as a (height, width, channels) numpy array (uint8 /\n"
+          "uint16 / float32 by bytes_per_channel; the first mip level). This is\n"
+          "a copy; ``pixel_data`` is the raw zero-copy byte view. Raises for\n"
+          "GPU-compressed images.")
       .def(
           "change_number_of_channels",
           [](CesiumGltf::ImageAsset& self,
@@ -1187,7 +1190,8 @@ void initGltfBindings(py::module& m) {
                   callback(
                       py::cast(gltf, py::return_value_policy::reference),
                       py::cast(node, py::return_value_policy::reference),
-                      py::cast(transform));
+                      CesiumPython::toNumpyView(transform, py::none())
+                          .attr("copy")());    // (4, 4) float64, see for_each_primitive_in_scene
                 });
           },
           py::arg("scene_id"),
@@ -2432,7 +2436,7 @@ void initGltfBindings(py::module& m) {
             py::arg("index"))
         .def(
             "__array__",
-            [](py::object selfObj, py::object dtype, bool copy) -> py::object {
+            [](py::object selfObj, py::object dtype, py::object copy) -> py::object {
               constexpr py::ssize_t nc = NumComponents<T>::value;
               auto& self = selfObj.cast<const CesiumGltf::AccessorView<T>&>();
               const auto n = static_cast<py::ssize_t>(self.size());
@@ -2492,13 +2496,15 @@ void initGltfBindings(py::module& m) {
                   return view.attr("astype")(target);
               }
 
-              if (copy) {
+              // numpy 2 calls __array__(dtype=None, copy=None); None means
+              // "copy only if needed", i.e. the zero-copy view
+              if (!copy.is_none() && py::cast<bool>(copy)) {
                 return view.attr("copy")();
               }
               return view;
             },
             py::arg("dtype") = py::none(),
-            py::arg("copy") = false,
+            py::arg("copy") = py::none(),
             "Convert to numpy array (zero-copy view into glTF buffer). "
             "Enables np.asarray(accessor_view).")
         .def(
