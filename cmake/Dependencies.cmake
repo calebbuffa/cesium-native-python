@@ -1,7 +1,23 @@
 # Third-party dependency bootstrapping for cesium-python.
 
-find_package(Python 3.8 REQUIRED COMPONENTS Interpreter Development)
-find_package(pybind11 REQUIRED)
+# Development.Module (not Development): manylinux images ship no libpython and
+# an extension module must not link one anyway.
+find_package(Python 3.8 REQUIRED COMPONENTS Interpreter Development.Module)
+
+# pybind11 comes from the build environment (pyproject build-system.requires);
+# let it tell us where its CMake package is, so a plain `pip install .` works
+# with no -Dpybind11_DIR.
+if(NOT pybind11_DIR)
+    execute_process(
+        COMMAND "${Python_EXECUTABLE}" -c "import pybind11; print(pybind11.get_cmake_dir())"
+        OUTPUT_VARIABLE _pybind11_cmake_dir
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET)
+    if(_pybind11_cmake_dir)
+        set(pybind11_DIR "${_pybind11_cmake_dir}")
+    endif()
+endif()
+find_package(pybind11 CONFIG REQUIRED)
 
 # Verify submodules are present
 set(CESIUM_NATIVE_DIR "${CMAKE_SOURCE_DIR}/extern/cesium-native")
