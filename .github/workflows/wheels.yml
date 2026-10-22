@@ -26,24 +26,29 @@ jobs:
     name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 360
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
         os: ${{ fromJSON(inputs.os || '["ubuntu-24.04", "windows-2022", "macos-14"]') }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           submodules: recursive
+          persist-credentials: false   # build scripts of ~30 ports run below
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
 
       # restore / save split so the vcpkg tree is kept even when the wheel step
-      # fails: the ports that did build are not rebuilt on the next run
+      # fails: the ports that did build are not rebuilt on the next run. The
+      # key ends with the run id, so every run saves its own (possibly more
+      # complete) tree and the next run restores the newest one by prefix.
       - name: Restore vcpkg tree
         id: vcpkg-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           # the vcpkg clone + installed prefix (~1.5 GB per OS); build trees,
           # downloads and packages are not needed to reuse the ports
@@ -52,8 +57,10 @@ jobs:
             !~/.ezvcpkg/*/buildtrees
             !~/.ezvcpkg/*/downloads
             !~/.ezvcpkg/*/packages
-          key: ezvcpkg-v2-${{ runner.os }}-${{ hashFiles('extern/cesium-native/vcpkg.json', 'extern/cesium-native/cmake/ezvcpkg/**') }}
-          restore-keys: ezvcpkg-v2-${{ runner.os }}-
+          key: ezvcpkg-v2-${{ runner.os }}-${{ hashFiles('extern/cesium-native/vcpkg.json', 'extern/cesium-native/cmake/ezvcpkg/**') }}-${{ github.run_id }}
+          restore-keys: |
+            ezvcpkg-v2-${{ runner.os }}-${{ hashFiles('extern/cesium-native/vcpkg.json', 'extern/cesium-native/cmake/ezvcpkg/**') }}-
+            ezvcpkg-v2-${{ runner.os }}-
 
       - name: Build wheels
         run: |
@@ -83,8 +90,8 @@ jobs:
           CIBW_TEST_COMMAND: python -c "import cesium; from cesium.tiles import content; content.register_all_tile_content_types(); print('cesium ok')"
 
       - name: Save vcpkg tree
-        if: always() && steps.vcpkg-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        if: always()
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.ezvcpkg
@@ -93,7 +100,7 @@ jobs:
             !~/.ezvcpkg/*/packages
           key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: wheels-${{ matrix.os }}
           path: wheelhouse/*.whl
@@ -104,10 +111,13 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
     needs: build
     runs-on: ubuntu-latest
+    concurrency:
+      group: release-${{ inputs.release_tag || github.ref_name }}
+      cancel-in-progress: false
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: wheels-*
           merge-multiple: true
@@ -116,8 +126,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
-          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --notes "cesium-native-python wheels (CPython 3.11-3.13; Linux x86_64, Windows x64, macOS arm64)"
-          gh release upload "$TAG" dist/*.whl --repo "$GITHUB_REPOSITORY" --clobber
+          # the tag is created at the commit that was built, not at the default branch
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "$TAG" \
+              --notes "cesium-native-python wheels (CPython 3.11-3.13; Linux x86_64, Windows x64, macOS arm64)" || \
+            gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null   # created concurrently
+          # one complete set per release: drop the previous wheels, then upload all
+          for a in $(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets -q '.assets[].name' | grep '[.]whl$' || true); do
+            gh release delete-asset "$TAG" "$a" --repo "$GITHUB_REPOSITORY" --yes
+          done
+          gh release upload "$TAG" dist/*.whl --repo "$GITHUB_REPOSITORY"
 
   publish:
     # PyPI trusted publishing: register this repository + workflow under the
@@ -129,9 +147,16 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Tag must match the package version
+        run: |
+          v=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "tag ${GITHUB_REF_NAME} but pyproject version $v"; exit 1; }
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: wheels-*
           merge-multiple: true
           path: dist
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
