@@ -209,6 +209,12 @@ class ImageAsset:
     def pixel_data(self, value: npt.NDArray[np.uint8]) -> None: ...
     size_bytes: int
     @property
+    def pixels(self) -> npt.NDArray[np.generic]:
+        """Decoded pixels as a zero-copy (height, width, channels) view
+        (uint8 / uint16 / float32 by bytes_per_channel). Raises ValueError
+        for GPU-compressed images."""
+        ...
+    @property
     def computed_size_bytes(self) -> int: ...
     def change_number_of_channels(
         self, new_channels: int, default_value: int = 0
@@ -888,6 +894,13 @@ _AnyAccessorView = (
     | AccessorViewDVec4
     | AccessorViewMat4
 )
+
+def accessor_to_numpy(model: Model, accessor_index: int) -> npt.NDArray[np.generic]:
+    """Accessor data as a numpy array with the glTF ``normalized`` flag
+    applied: normalized integer components come back as float32 in [0, 1]
+    (unsigned) or [-1, 1] (signed); otherwise the zero-copy view of the
+    stored component type (see ``AccessorView``)."""
+    ...
 
 def AccessorView(model: Model, accessor_index: int) -> _AnyAccessorView:
     """Create a typed AccessorView, auto-detecting type from the accessor.
