@@ -155,7 +155,7 @@ class GeocoderAttribution:
     show_on_screen: bool
 
 class GeocoderFeature:
-    def __init__(self) -> None: ...
+    # no constructor: instances come from Geocoder results
     display_name: str
     @property
     def globe_rectangle(self) -> GlobeRectangle: ...

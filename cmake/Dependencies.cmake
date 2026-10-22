@@ -25,6 +25,15 @@ if(NOT EXISTS "${CESIUM_NATIVE_DIR}/CMakeLists.txt")
     message(FATAL_ERROR "Missing submodule: extern/cesium-native. Run: git submodule update --init --recursive")
 endif()
 
+# Build all submodules as static libraries (no DLL at runtime): cesium-native
+# and libzip alike, so this goes before either is added. CACHE+FORCE
+# overrides stale values in an existing build directory.
+if(DEFINED BUILD_SHARED_LIBS)
+    set(_BUILD_SHARED_LIBS_ORIG ${BUILD_SHARED_LIBS})
+endif()
+cmake_policy(SET CMP0077 NEW)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libraries" FORCE)
+
 # cesium-native and libzip are built here as static libraries that end up
 # inside a shared extension module, so they must be position independent
 # (GNU ld otherwise refuses them: "recompile with -fPIC"); vcpkg's own ports
@@ -41,9 +50,20 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 # and the module.
 option(CESIUM_PYTHON_STATIC_CRT "Link the MSVC runtime statically (/MT)" ON)
 if(MSVC AND CESIUM_PYTHON_STATIC_CRT)
-    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-    if(NOT VCPKG_TARGET_TRIPLET AND NOT DEFINED ENV{VCPKG_TRIPLET})
-        set(VCPKG_TARGET_TRIPLET "x64-windows-static")
+    set(_cesium_triplet "${VCPKG_TARGET_TRIPLET}")
+    if(NOT _cesium_triplet AND DEFINED ENV{VCPKG_TRIPLET})
+        set(_cesium_triplet "$ENV{VCPKG_TRIPLET}")
+    endif()
+    if(NOT _cesium_triplet)
+        set(_cesium_triplet "x64-windows-static")
+        set(VCPKG_TARGET_TRIPLET "${_cesium_triplet}")
+    endif()
+    # the module must use the same CRT as the vcpkg ports it links
+    if(_cesium_triplet MATCHES "-static$")
+        set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    else()
+        message(WARNING "CESIUM_PYTHON_STATIC_CRT is ON but the vcpkg triplet "
+                        "'${_cesium_triplet}' uses the dynamic CRT; keeping /MD to match it")
     endif()
 endif()
 
@@ -65,13 +85,6 @@ if(NOT EXISTS "${LIBZIP_DIR}/CMakeLists.txt")
 endif()
 
 
-# Build all submodules as static libraries (no DLL at runtime).
-# Use CACHE+FORCE to override stale values in an existing build directory.
-if(DEFINED BUILD_SHARED_LIBS)
-    set(_BUILD_SHARED_LIBS_ORIG ${BUILD_SHARED_LIBS})
-endif()
-cmake_policy(SET CMP0077 NEW)
-set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libraries" FORCE)
 
 set(LIBZIP_DO_INSTALL OFF CACHE BOOL "Skip libzip install")
 set(ENABLE_BZIP2 OFF CACHE BOOL "Disable bzip2 support")
