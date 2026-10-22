@@ -127,3 +127,10 @@ set(CESIUM_PYTHON_LINK_LIBS
     CesiumVectorData
     glm::glm
 )
+
+# glibc < 2.34 keeps getaddrinfo_a (used through the vcpkg ports) in libanl;
+# without it the extension module imports with "undefined symbol:
+# getaddrinfo_a" on manylinux_2_28. libanl.so.1 is on the manylinux whitelist.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    list(APPEND CESIUM_PYTHON_LINK_LIBS anl)
+endif()
