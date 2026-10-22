@@ -1175,16 +1175,25 @@ void initGltfBindings(py::module& m) {
                     CesiumGltf::MeshPrimitive& primitive,
                     const glm::dmat4& transform) {
                   py::gil_scoped_acquire gil;
+                  // copy: the dmat4 only lives for this call
+                  py::object matrix =
+                      CesiumPython::toNumpyView(transform, py::none())
+                          .attr("copy")();
                   callback(
                       py::cast(gltf, py::return_value_policy::reference),
                       py::cast(node, py::return_value_policy::reference),
                       py::cast(mesh, py::return_value_policy::reference),
                       py::cast(primitive, py::return_value_policy::reference),
-                      py::cast(transform));
+                      matrix);
                 });
           },
           py::arg("scene_id"),
-          py::arg("callback"))
+          py::arg("callback"),
+          "Call ``callback(model, node, mesh, primitive, transform)`` for\n"
+          "every primitive reachable from the scene. ``transform`` is the\n"
+          "node's world matrix as a (4, 4) float64 numpy array in glm's\n"
+          "column-major layout, ``arr[col][row]``: the translation is\n"
+          "``arr[3][:3]`` and ``arr.T`` is the usual row-major matrix.")
       .def(
           "__repr__",
           [](const CesiumGltf::Model& self) {
