@@ -38,6 +38,7 @@
 #include <CesiumGltf/FeatureIdTexture.h>
 #include <CesiumGltf/Image.h>
 #include <CesiumGltf/ImageAsset.h>
+#include <glm/glm.hpp>
 #include <CesiumGltf/InstanceAttributeSemantics.h>
 #include <CesiumGltf/KhrTextureTransform.h>
 #include <CesiumGltf/Ktx2TranscodeTargets.h>
@@ -85,13 +86,22 @@ template <typename T> struct NumComponents {
     if constexpr (std::is_arithmetic_v<T>)
       return 1;
     else if constexpr (
-        std::is_same_v<T, glm::vec2> || std::is_same_v<T, glm::dvec2>)
+        std::is_same_v<T, glm::vec2> || std::is_same_v<T, glm::dvec2> ||
+        std::is_same_v<T, glm::i8vec2> || std::is_same_v<T, glm::u8vec2> ||
+        std::is_same_v<T, glm::i16vec2> || std::is_same_v<T, glm::u16vec2> ||
+        std::is_same_v<T, glm::u32vec2>)
       return 2;
     else if constexpr (
-        std::is_same_v<T, glm::vec3> || std::is_same_v<T, glm::dvec3>)
+        std::is_same_v<T, glm::vec3> || std::is_same_v<T, glm::dvec3> ||
+        std::is_same_v<T, glm::i8vec3> || std::is_same_v<T, glm::u8vec3> ||
+        std::is_same_v<T, glm::i16vec3> || std::is_same_v<T, glm::u16vec3> ||
+        std::is_same_v<T, glm::u32vec3>)
       return 3;
     else if constexpr (
-        std::is_same_v<T, glm::vec4> || std::is_same_v<T, glm::dvec4>)
+        std::is_same_v<T, glm::vec4> || std::is_same_v<T, glm::dvec4> ||
+        std::is_same_v<T, glm::i8vec4> || std::is_same_v<T, glm::u8vec4> ||
+        std::is_same_v<T, glm::i16vec4> || std::is_same_v<T, glm::u16vec4> ||
+        std::is_same_v<T, glm::u32vec4>)
       return 4;
     else if constexpr (std::is_same_v<T, glm::mat4>)
       return 16;
@@ -239,6 +249,38 @@ void initGltfBindings(py::module& m) {
             std::memcpy(self.pixelData.data(), ptr, buf.size);
           })
       .def_readwrite("size_bytes", &CesiumGltf::ImageAsset::sizeBytes)
+      .def_property_readonly(
+          "pixels",
+          [](py::object selfObj) -> py::object {
+            auto& self = selfObj.cast<CesiumGltf::ImageAsset&>();
+            if (self.compressedPixelFormat !=
+                CesiumGltf::GpuCompressedPixelFormat::NONE)
+              throw py::value_error(
+                  "pixels: image is GPU-compressed; decode with "
+                  "Ktx2TranscodeTargets left empty to get RGBA8");
+            const py::ssize_t h = self.height, w = self.width,
+                              c = self.channels, b = self.bytesPerChannel;
+            if (h <= 0 || w <= 0 || c <= 0 || b <= 0 ||
+                static_cast<py::ssize_t>(self.pixelData.size()) < h * w * c * b)
+              throw py::value_error("pixels: image has no decoded pixel data");
+            py::array raw = CesiumPython::bytesVectorToNumpy(
+                self.pixelData,
+                selfObj);
+            auto np = py::module_::import("numpy");
+            py::object dtype = b == 1   ? np.attr("uint8")
+                               : b == 2 ? np.attr("uint16")
+                               : b == 4 ? np.attr("float32")
+                                        : np.attr("uint8");
+            py::object flat = raw.attr("__getitem__")(
+                py::slice(0, h * w * c * b, 1));
+            // an owning copy: pixel_data (the raw view) may be replaced or
+            // resized later, which would leave a retained view dangling
+            return flat.attr("view")(dtype).attr("reshape")(h, w, c).attr("copy")();
+          },
+          "Decoded pixels as a (height, width, channels) numpy array (uint8 /\n"
+          "uint16 / float32 by bytes_per_channel; the first mip level). This is\n"
+          "a copy; ``pixel_data`` is the raw zero-copy byte view. Raises for\n"
+          "GPU-compressed images.")
       .def(
           "change_number_of_channels",
           [](CesiumGltf::ImageAsset& self,
@@ -1148,7 +1190,8 @@ void initGltfBindings(py::module& m) {
                   callback(
                       py::cast(gltf, py::return_value_policy::reference),
                       py::cast(node, py::return_value_policy::reference),
-                      py::cast(transform));
+                      CesiumPython::toNumpyView(transform, py::none())
+                          .attr("copy")());    // (4, 4) float64, see for_each_primitive_in_scene
                 });
           },
           py::arg("scene_id"),
@@ -1165,16 +1208,25 @@ void initGltfBindings(py::module& m) {
                     CesiumGltf::MeshPrimitive& primitive,
                     const glm::dmat4& transform) {
                   py::gil_scoped_acquire gil;
+                  // copy: the dmat4 only lives for this call
+                  py::object matrix =
+                      CesiumPython::toNumpyView(transform, py::none())
+                          .attr("copy")();
                   callback(
                       py::cast(gltf, py::return_value_policy::reference),
                       py::cast(node, py::return_value_policy::reference),
                       py::cast(mesh, py::return_value_policy::reference),
                       py::cast(primitive, py::return_value_policy::reference),
-                      py::cast(transform));
+                      matrix);
                 });
           },
           py::arg("scene_id"),
-          py::arg("callback"))
+          py::arg("callback"),
+          "Call ``callback(model, node, mesh, primitive, transform)`` for\n"
+          "every primitive reachable from the scene. ``transform`` is the\n"
+          "node's world matrix as a (4, 4) float64 numpy array in glm's\n"
+          "column-major layout, ``arr[col][row]``: the translation is\n"
+          "``arr[3][:3]`` and ``arr.T`` is the usual row-major matrix.")
       .def(
           "__repr__",
           [](const CesiumGltf::Model& self) {
@@ -2384,7 +2436,7 @@ void initGltfBindings(py::module& m) {
             py::arg("index"))
         .def(
             "__array__",
-            [](py::object selfObj, py::object dtype, bool copy) -> py::object {
+            [](py::object selfObj, py::object dtype, py::object copy) -> py::object {
               constexpr py::ssize_t nc = NumComponents<T>::value;
               auto& self = selfObj.cast<const CesiumGltf::AccessorView<T>&>();
               const auto n = static_cast<py::ssize_t>(self.size());
@@ -2444,13 +2496,15 @@ void initGltfBindings(py::module& m) {
                   return view.attr("astype")(target);
               }
 
-              if (copy) {
+              // numpy 2 calls __array__(dtype=None, copy=None); None means
+              // "copy only if needed", i.e. the zero-copy view
+              if (!copy.is_none() && py::cast<bool>(copy)) {
                 return view.attr("copy")();
               }
               return view;
             },
             py::arg("dtype") = py::none(),
-            py::arg("copy") = false,
+            py::arg("copy") = py::none(),
             "Convert to numpy array (zero-copy view into glTF buffer). "
             "Enables np.asarray(accessor_view).")
         .def(
@@ -2481,6 +2535,22 @@ void initGltfBindings(py::module& m) {
   bindAccessorView.operator()<glm::dvec3>("AccessorViewDVec3");
   bindAccessorView.operator()<glm::dvec4>("AccessorViewDVec4");
   bindAccessorView.operator()<glm::mat4>("AccessorViewMat4");
+  // integer vectors: normalized COLOR_0 / TEXCOORD / JOINTS / WEIGHTS
+  bindAccessorView.operator()<glm::i8vec2>("AccessorViewI8Vec2");
+  bindAccessorView.operator()<glm::i8vec3>("AccessorViewI8Vec3");
+  bindAccessorView.operator()<glm::i8vec4>("AccessorViewI8Vec4");
+  bindAccessorView.operator()<glm::u8vec2>("AccessorViewU8Vec2");
+  bindAccessorView.operator()<glm::u8vec3>("AccessorViewU8Vec3");
+  bindAccessorView.operator()<glm::u8vec4>("AccessorViewU8Vec4");
+  bindAccessorView.operator()<glm::i16vec2>("AccessorViewI16Vec2");
+  bindAccessorView.operator()<glm::i16vec3>("AccessorViewI16Vec3");
+  bindAccessorView.operator()<glm::i16vec4>("AccessorViewI16Vec4");
+  bindAccessorView.operator()<glm::u16vec2>("AccessorViewU16Vec2");
+  bindAccessorView.operator()<glm::u16vec3>("AccessorViewU16Vec3");
+  bindAccessorView.operator()<glm::u16vec4>("AccessorViewU16Vec4");
+  bindAccessorView.operator()<glm::u32vec2>("AccessorViewU32Vec2");
+  bindAccessorView.operator()<glm::u32vec3>("AccessorViewU32Vec3");
+  bindAccessorView.operator()<glm::u32vec4>("AccessorViewU32Vec4");
 
   // ── AccessorView factory ──────────────────────────────────────────────
   // ``AccessorView(model, accessor_index)`` auto-detects componentType +
@@ -2535,20 +2605,62 @@ void initGltfBindings(py::module& m) {
             break;
           }
         } else if (type == AT::VEC2) {
-          if (ct == CT::FLOAT)
+          switch (ct) {
+          case CT::FLOAT:
             RETURN_VIEW(glm::vec2);
-          if (ct == CT::DOUBLE)
+          case CT::DOUBLE:
             RETURN_VIEW(glm::dvec2);
+          case CT::BYTE:
+            RETURN_VIEW(glm::i8vec2);
+          case CT::UNSIGNED_BYTE:
+            RETURN_VIEW(glm::u8vec2);
+          case CT::SHORT:
+            RETURN_VIEW(glm::i16vec2);
+          case CT::UNSIGNED_SHORT:
+            RETURN_VIEW(glm::u16vec2);
+          case CT::UNSIGNED_INT:
+            RETURN_VIEW(glm::u32vec2);
+          default:
+            break;
+          }
         } else if (type == AT::VEC3) {
-          if (ct == CT::FLOAT)
+          switch (ct) {
+          case CT::FLOAT:
             RETURN_VIEW(glm::vec3);
-          if (ct == CT::DOUBLE)
+          case CT::DOUBLE:
             RETURN_VIEW(glm::dvec3);
+          case CT::BYTE:
+            RETURN_VIEW(glm::i8vec3);
+          case CT::UNSIGNED_BYTE:
+            RETURN_VIEW(glm::u8vec3);
+          case CT::SHORT:
+            RETURN_VIEW(glm::i16vec3);
+          case CT::UNSIGNED_SHORT:
+            RETURN_VIEW(glm::u16vec3);
+          case CT::UNSIGNED_INT:
+            RETURN_VIEW(glm::u32vec3);
+          default:
+            break;
+          }
         } else if (type == AT::VEC4) {
-          if (ct == CT::FLOAT)
+          switch (ct) {
+          case CT::FLOAT:
             RETURN_VIEW(glm::vec4);
-          if (ct == CT::DOUBLE)
+          case CT::DOUBLE:
             RETURN_VIEW(glm::dvec4);
+          case CT::BYTE:
+            RETURN_VIEW(glm::i8vec4);
+          case CT::UNSIGNED_BYTE:
+            RETURN_VIEW(glm::u8vec4);
+          case CT::SHORT:
+            RETURN_VIEW(glm::i16vec4);
+          case CT::UNSIGNED_SHORT:
+            RETURN_VIEW(glm::u16vec4);
+          case CT::UNSIGNED_INT:
+            RETURN_VIEW(glm::u32vec4);
+          default:
+            break;
+          }
         } else if (type == AT::MAT4) {
           if (ct == CT::FLOAT)
             RETURN_VIEW(glm::mat4);
@@ -2565,8 +2677,61 @@ void initGltfBindings(py::module& m) {
       py::keep_alive<0, 1>(),
       "Create a typed AccessorView from a model and accessor index.\n\n"
       "Auto-detects the accessor's type and componentType and returns\n"
-      "the matching AccessorView (e.g. AccessorViewVec3 for VEC3/FLOAT).\n"
-      "Use ``np.array(view)`` for a zero-copy numpy array.");
+      "the matching AccessorView (e.g. AccessorViewVec3 for VEC3/FLOAT,\n"
+      "AccessorViewU8Vec4 for VEC4/UNSIGNED_BYTE).\n"
+      "Use ``np.array(view)`` for a zero-copy numpy array of the stored\n"
+      "component type; ``accessor_to_numpy`` also applies ``normalized``.");
+
+  m.def(
+      "accessor_to_numpy",
+      [](const CesiumGltf::Model& model, int32_t accessorIndex) -> py::object {
+        const auto* acc =
+            CesiumGltf::Model::getSafe(&model.accessors, accessorIndex);
+        if (!acc)
+          throw py::value_error("invalid accessor index");
+        py::object view =
+            py::module_::import("cesium.gltf").attr("AccessorView")(
+                py::cast(model, py::return_value_policy::reference),
+                accessorIndex);
+        auto np = py::module_::import("numpy");
+        py::object arr = np.attr("asarray")(view);
+        if (!acc->normalized)
+          return arr;
+        // glTF: unsigned normalized = x / max; signed = max(x / max, -1)
+        using CT = CesiumGltf::Accessor::ComponentType;
+        double maxValue = 0.0;
+        bool isSigned = false;
+        switch (acc->componentType) {
+        case CT::BYTE:
+          maxValue = 127.0;
+          isSigned = true;
+          break;
+        case CT::UNSIGNED_BYTE:
+          maxValue = 255.0;
+          break;
+        case CT::SHORT:
+          maxValue = 32767.0;
+          isSigned = true;
+          break;
+        case CT::UNSIGNED_SHORT:
+          maxValue = 65535.0;
+          break;
+        default:
+          return arr;    // float / double: normalized has no meaning
+        }
+        py::object out =
+            arr.attr("astype")(np.attr("float32")).attr("__truediv__")(
+                py::float_(maxValue));
+        if (isSigned)
+          out = np.attr("maximum")(out, py::float_(-1.0));
+        return out;
+      },
+      py::arg("model"),
+      py::arg("accessor_index"),
+      "Accessor data as a numpy array, with the glTF ``normalized`` flag\n"
+      "applied: normalized integer components come back as float32 in\n"
+      "[0, 1] (unsigned) or [-1, 1] (signed); everything else is the\n"
+      "zero-copy view of the stored component type (see ``AccessorView``).");
 
   auto bindAccessorWriter = [&]<typename T>(const char* name) {
     py::class_<CesiumGltf::AccessorWriter<T>>(m, name)

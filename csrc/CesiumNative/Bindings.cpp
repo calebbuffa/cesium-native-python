@@ -1,11 +1,18 @@
 #include "BindingsRegistry.h"
 
+#include <Cesium3DTilesContent/registerAllTileContentTypes.h>
+
 #include <pybind11/pybind11.h>
 
 namespace py = pybind11;
 
 PYBIND11_MODULE(_native, m) {
   m.doc() = "Compiled C++ bindings for cesium-native";
+
+  // Without this every tile is "unknown content" until the caller remembers
+  // to call cesium.tiles.content.register_all_tile_content_types(); do it
+  // once here (the call is idempotent, calling it again is harmless).
+  Cesium3DTilesContent::registerAllTileContentTypes();
 
   // Canonical Python-facing submodules.
   auto async_ = m.def_submodule("async_", "CesiumAsync");

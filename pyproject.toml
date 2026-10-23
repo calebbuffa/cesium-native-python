@@ -7,15 +7,18 @@ name = "cesium-python"
 version = "0.1.0"
 description = "Python bindings for the Cesium Native C++ SDK"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = ["numpy"]
 classifiers = [
     "Operating System :: OS Independent",
     "Programming Language :: Python",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
 ]
 
 [tool.ruff]
-target-version = "py312"
+target-version = "py311"
 extend-exclude = ["extern"]
 
 [tool.scikit-build]

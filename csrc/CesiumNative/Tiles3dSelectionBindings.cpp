@@ -1191,7 +1191,18 @@ void initTiles3dSelectionBindings(py::module& m) {
             return self.getActivatedOverlays();
           });
 
-  py::class_<Cesium3DTilesSelection::TilesetOptions>(m, "TilesetOptions")
+  py::class_<Cesium3DTilesSelection::TilesetOptions>(
+      m,
+      "TilesetOptions",
+      "Options of a Tileset. ``Tileset.options`` returns a live reference:\n"
+      "fields read on every ``update_view_group`` take effect immediately\n"
+      "(maximum_screen_space_error, maximum_cached_bytes, the culling and\n"
+      "preload flags, forbid_holes, main_thread_loading_time_limit).\n"
+      "Fields the loader reads when the tileset is created only count when\n"
+      "set before that: maximum_simultaneous_tile_loads, request_headers,\n"
+      "content options and the ellipsoid. Change fields from the thread\n"
+      "that drives update_view_group, between two updates: the GIL is\n"
+      "released while an update runs and the C++ side reads them unlocked.")
       .def(py::init<>())
       .def_readwrite("credit", &Cesium3DTilesSelection::TilesetOptions::credit)
       .def_readwrite(
@@ -2036,7 +2047,13 @@ void initTiles3dSelectionBindings(py::module& m) {
           },
           [](Cesium3DTilesSelection::Tile& self, const py::object& transform) {
             self.setTransform(toDmat<4>(transform));
-          })
+          },
+          "The tile's transform as a (4, 4) float64 array in glm's\n"
+          "column-major layout, ``arr[col][row]``: the translation is\n"
+          "``arr[3][:3]``, ``arr.T`` is the row-major matrix. The same\n"
+          "layout is expected when assigning. All 4x4 matrices in this\n"
+          "package use it (ViewState, bounding volume transforms, node\n"
+          "transforms).")
       .def_property(
           "tile_id",
           [](const Cesium3DTilesSelection::Tile& self) -> py::object {
