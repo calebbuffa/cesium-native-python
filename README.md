@@ -28,7 +28,7 @@ NumPy arrays are used throughout for positions, transforms, and bulk data — no
 
 ## Requirements
 
-- Python 3.12+
+- Python 3.11+
 - CMake 3.15+
 - A C++17 compiler (MSVC 2019+, GCC 11+, Clang 13+)
 - NumPy
