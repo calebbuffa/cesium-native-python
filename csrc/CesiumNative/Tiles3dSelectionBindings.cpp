@@ -525,7 +525,7 @@ public:
     auto asyncSystem = input.asyncSystem;
 
     py::function override_ = pybind11::get_override(
-        static_cast<const Cesium3DTilesSelection::GltfModifier*>(this),
+        static_cast<const PyGltfModifier*>(this),
         "apply");
     if (!override_) {
       throw py::type_error(
