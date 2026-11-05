@@ -69,6 +69,14 @@ void initGltfWriterBindings(py::module& m) {
              const CesiumGltf::Model& model,
              const py::bytes& buffer_data,
              const CesiumGltfWriter::GltfWriterOptions& options) {
+            if (model.buffers.size() > 1) {
+              throw py::value_error(
+                  "write_glb: the model has " +
+                  std::to_string(model.buffers.size()) +
+                  " buffers but a GLB holds one BIN chunk; call "
+                  "cesium.gltf.content.GltfUtilities.collapse_to_single_buffer("
+                  "model) first");
+            }
             std::vector<std::byte> data =
                 CesiumPython::bytesToVector(buffer_data);
             return self.writeGlb(
